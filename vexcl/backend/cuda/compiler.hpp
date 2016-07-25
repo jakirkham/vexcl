@@ -1,10 +1,10 @@
-#ifndef VEXCL_BACKEND_CUDA_COMPILER_HPP
-#define VEXCL_BACKEND_CUDA_COMPILER_HPP
+#ifndef VEXCL_BACKEND_CUDA_COMPILER_NVRTC_HPP
+#define VEXCL_BACKEND_CUDA_COMPILER_NVRTC_HPP
 
 /*
 The MIT License
 
-Copyright (c) 2012-2016 Denis Demidov <dennis.demidov@gmail.com>
+Copyright (c) 2012-2015 Denis Demidov <dennis.demidov@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,20 +26,54 @@ THE SOFTWARE.
 */
 
 /**
- * \file   vexcl/backend/cuda/compiler.hpp
+ * \file   vexcl/backend/cuda/compiler_nvrtc.hpp
  * \author Denis Demidov <dennis.demidov@gmail.com>
  * \brief  CUDA source code compilation wrapper.
  */
 
 #include <cstdlib>
 #include <cuda.h>
+#include <nvrtc.h>
 
 #include <vexcl/backend/common.hpp>
 #include <vexcl/detail/backtrace.hpp>
+#include <vexcl/backend/cuda/error.hpp>
+
+namespace std {
+
+/// Send human-readable representation of nvrtcResult to the output stream.
+inline std::ostream& operator<<(std::ostream &os, nvrtcResult rc) {
+    os << "NVRTC Error (";
+#define VEXCL_NVRTC_ERR2TXT(e) case e: os << static_cast<int>(e) << " - " << #e; break
+    switch(rc) {
+        VEXCL_NVRTC_ERR2TXT(NVRTC_SUCCESS);
+        VEXCL_NVRTC_ERR2TXT(NVRTC_ERROR_OUT_OF_MEMORY);
+        VEXCL_NVRTC_ERR2TXT(NVRTC_ERROR_PROGRAM_CREATION_FAILURE);
+        VEXCL_NVRTC_ERR2TXT(NVRTC_ERROR_INVALID_INPUT);
+        VEXCL_NVRTC_ERR2TXT(NVRTC_ERROR_INVALID_PROGRAM);
+        VEXCL_NVRTC_ERR2TXT(NVRTC_ERROR_INVALID_OPTION);
+        VEXCL_NVRTC_ERR2TXT(NVRTC_ERROR_COMPILATION);
+        VEXCL_NVRTC_ERR2TXT(NVRTC_ERROR_BUILTIN_OPERATION_FAILURE);
+        default:
+            os << "Unknown error";
+    }
+#undef VEXCL_NVRTC_ERR2TXT
+    return os << ")";
+}
+
+} // namespace std
 
 namespace vex {
 namespace backend {
+
 namespace cuda {
+
+inline void check(nvrtcResult rc, const char *file, int line) {
+    if (rc != NVRTC_SUCCESS) {
+        vex::detail::print_backtrace();
+	throw error(rc, file, line);
+    }
+}
 
 /// Create and build a program from source string.
 inline vex::backend::program build_sources(
@@ -61,57 +95,35 @@ inline vex::backend::program build_sources(
 #  endif
 #endif
 
-    std::string compile_options = options + " " + get_compile_options(queue);
-
+    std::cout << "options: " << options << std::endl;
     queue.context().set_current();
 
-    auto cc = queue.device().compute_capability();
-    std::ostringstream ccstr;
-    ccstr << std::get<0>(cc) << std::get<1>(cc);
+    nvrtcProgram prog;
+    cuda_check( nvrtcCreateProgram(&prog, source.c_str(), NULL, 0, NULL, NULL) );
 
-    sha1_hasher sha1;
-    sha1.process(source)
-        .process(queue.device().name())
-        .process(compile_options)
-        .process(ccstr.str())
-        ;
+    try {
+        cuda_check( nvrtcCompileProgram(prog, 0, NULL) );
+    } catch (...) {
+        size_t log_size;
+        cuda_check( nvrtcGetProgramLogSize(prog, &log_size) );
+        std::vector<char> log(log_size);
+        cuda_check( nvrtcGetProgramLog(prog, log.data()) );
 
-    std::string hash = static_cast<std::string>(sha1);
-
-    // Write source to a .cu file
-    std::string basename = program_binaries_path(hash, true) + "kernel";
-    std::string ptxfile  = basename + ".ptx";
-
-    if ( !boost::filesystem::exists(ptxfile) ) {
-        std::string cufile = basename + ".cu";
-
-        {
-            std::ofstream f(basename + ".cu");
-            f << source;
-        }
-
-        // Compile the source to ptx.
-        std::ostringstream cmdline;
-        cmdline
-            << "nvcc -ptx -O3"
-            << " -arch=sm_" << std::get<0>(cc) << std::get<1>(cc)
-            << " " << compile_options
-            << " -o " << ptxfile << " " << cufile;
-        if (0 != system(cmdline.str().c_str()) ) {
-#ifndef VEXCL_SHOW_KERNELS
-            std::cerr << source << std::endl;
-#endif
-
-            vex::detail::print_backtrace();
-            throw std::runtime_error("nvcc invocation failed");
-        }
+        std::cerr << log.data() << std::endl;
+        throw;
     }
 
-    // Load the compiled ptx.
-    CUmodule prg;
-    cuda_check( cuModuleLoad(&prg, ptxfile.c_str()) );
+    size_t ptx_size;
+    cuda_check( nvrtcGetPTXSize(prog, &ptx_size) );
+    std::vector<char> ptx(ptx_size);
+    cuda_check( nvrtcGetPTX(prog, ptx.data()) );
+    cuda_check( nvrtcDestroyProgram(&prog) );
 
-    return program(queue.context(), prg);
+    // Load the compiled ptx.
+    CUmodule module;
+    cuda_check( cuModuleLoadDataEx(&module, ptx.data(), 0, 0, 0) );
+
+    return program(queue.context(), module);
 }
 
 } // namespace cuda
