@@ -15,6 +15,10 @@ if ("${VEXCL_BACKEND}" STREQUAL "CUDA")
     target_link_libraries(benchmark ${CUDA_cusparse_LIBRARY})
 endif()
 
+if ("${VEXCL_BACKEND}" STREQUAL "Maxeler")
+    add_vexcl_example(maxeler)
+endif()
+
 if ("${VEXCL_BACKEND}" STREQUAL "OpenCL")
     add_vexcl_example(exclusive)
 endif()

@@ -100,8 +100,8 @@ if (WIN32)
     add_definitions(/wd4003) # Not enough actual parameters for a BOOST_PP macro
 endif ()
 
-set(VEXCL_BACKEND "OpenCL" CACHE STRING "Select VexCL backend (OpenCL/CUDA)")
-set_property(CACHE VEXCL_BACKEND PROPERTY STRINGS "OpenCL" "CUDA" "Compute" "JIT")
+set(VEXCL_BACKEND "OpenCL" CACHE STRING "Select VexCL backend")
+set_property(CACHE VEXCL_BACKEND PROPERTY STRINGS "OpenCL" "CUDA" "Compute" "JIT" "Maxeler")
 
 #----------------------------------------------------------------------------
 # Find Backend
@@ -125,6 +125,9 @@ elseif ("${VEXCL_BACKEND}" STREQUAL "CUDA")
     set(CUDA_COMPUTE_CAPABILITY "35" CACHE STRING "CUDA Compute Capability")
 elseif ("${VEXCL_BACKEND}" STREQUAL "JIT")
     add_definitions(-DVEXCL_BACKEND_JIT)
+    set(BACKEND_LIBS dl)
+elseif ("${VEXCL_BACKEND}" STREQUAL "Maxeler")
+    add_definitions(-DVEXCL_BACKEND_MAXELER)
     set(BACKEND_LIBS dl)
 endif()
 
