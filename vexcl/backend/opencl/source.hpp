@@ -310,7 +310,7 @@ class source_generator {
             return s.str();
         }
 
-        std::string str() const {
+        std::string sources() const {
             return src.str();
         }
 
