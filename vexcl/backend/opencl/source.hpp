@@ -314,6 +314,10 @@ class source_generator {
             return src.str();
         }
 
+        std::string str() const {
+            return src.str();
+        }
+
     private:
         template <class T>
         friend inline
